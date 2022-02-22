@@ -13,37 +13,50 @@ load_dotenv()
 app = FastAPI()
 
 slack_token = os.getenv("SLACK_TOKEN")
-jira_url = os.getenv("JIRA_URL")
+jira_api_url = os.getenv("JIRA_API_URL")
+jira_ui_url = os.getenv("JIRA_UI_URL")
 jira_username = os.getenv("JIRA_USERNAME")
 jira_token = os.getenv("JIRA_TOKEN")
 client = slack.WebClient(token=slack_token)
 
 class JiraSearchResults(BaseModel):
-    expand: str
+    expand: Optional[str]
     startAt: int
     maxResults: int
     total: int
-    issues: List[dict]
+    issues: Optional[List[dict]]
     warningMessages: Optional[List[str]]
 
-@app.get("/send-message")
-def send_test_message():
+class JiraSanitisedTicket(BaseModel):
+    issue_key: str
+    url: str
+    summary: str
+    status: str
+
+class JiraSanitisedResults(BaseModel):
+    total: int
+    results: List[JiraSanitisedTicket]
+
+def send_message():
     client.chat_postMessage(channel='travl', text='suh dude')
     return {
         "message": "Test Message Sent Successfully"
     }
 
-@app.post("/slash/gimme")
-def slash_command_test(api_app_id: str = Form(...), text: str = Form(...), command: str = Form(...), user_id: str = Form(...), user_name: str = Form(...),
-    channel_id: str = Form(...), channel_name: str = Form(...)):
+@app.post("/jira-search")
+def jira_search(text: str = Form(...)):
+    params = text.split(None, 1)
+    if len(params) < 2: return "Please provide both the Project Key and Search Query."
+    # if params[0] != "LIVE" or params[0] != "IDEA": return "Sorry, we currently only support LIVE or IDEA searches."
+    if params[0] != "TRAVL": return "Sorry, we currently only support LIVE or IDEA searches."
+    query = params[1]
+    result = search_jira(params[0], query)
+    response_message = build_jira_message(result.total, params[0], query, result.results)
 
-    print(api_app_id, text, command, user_id, user_name, channel_id, channel_name)
+    return response_message
 
-    return "done"
-
-@app.post("/jira", response_model=JiraSearchResults)
-def search_jira(query: str):
-    url = f"{jira_url}/search"
+def search_jira(project_key: str, query: str) -> JiraSanitisedResults: 
+    url = f"{jira_api_url}/search"
     auth = HTTPBasicAuth(jira_username, jira_token)
 
     headers = {
@@ -51,7 +64,9 @@ def search_jira(query: str):
     }
 
     query = {
-        'jql': f'project = TRAVL AND text ~ {query}'
+        'jql': f"project = {project_key} AND text ~ '{query}'",
+        'maxResults': 10,
+        'fields': 'key,self,summary,status'
     }
 
     response = requests.request(
@@ -62,6 +77,85 @@ def search_jira(query: str):
         auth=auth
     )
 
-    data = json.loads(response.text)
+    data = JiraSearchResults.parse_obj(json.loads(response.text))
+    
+    if data.total == 0: return JiraSanitisedResults(
+        total=0,
+        results=[]
+    )
 
-    return data
+    results = []
+    for issue in data.issues:
+        results.append(JiraSanitisedTicket(
+            issue_key=issue["key"],
+            url=f'{jira_ui_url}/browse/{issue["key"]}',
+            summary=issue["fields"]["summary"],
+            status=issue["fields"]["status"]["name"]
+        ))
+    
+    return JiraSanitisedResults(
+        total=data.total,
+        results=results
+    )
+
+def build_jira_message(total: int, project_key: str, query: str, issues: List[JiraSanitisedTicket]):
+    
+    markdown_text = ""
+
+    for issue in issues:
+        markdown_text += f"<{issue.url}|{issue.issue_key}> - {issue.summary} - *{issue.status}*\n"
+
+    return {
+        "blocks": [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"Here are the first {total} results for your query"
+                }
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "plain_text",
+                        "text": f"Project Key: {project_key}"
+                    },
+                    {
+                        "type": "plain_text",
+                        "text": f"Query: '{query}'"
+                    }
+                ]
+            },
+            {
+                "type": "divider"
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": markdown_text
+                }
+            },
+            {
+                "type": "divider"
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "View all results here:"
+                },
+                "accessory": {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Click Me"
+                    },
+                    "value": "click_me_827",
+                    "url": f"{jira_ui_url}/issues/?jql=project%20=%20{project_key}%20AND%20text%20~%20'{query}'",
+                    "action_id": "button-action"
+                }
+            }
+        ]
+    }
