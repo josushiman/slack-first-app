@@ -16,7 +16,12 @@ slack_token = os.getenv("SLACK_TOKEN")
 jira_api_url = os.getenv("JIRA_API_URL")
 jira_ui_url = os.getenv("JIRA_UI_URL")
 jira_username = os.getenv("JIRA_USERNAME")
-jira_token = os.getenv("JIRA_TOKEN")
+jira_token = "3tKP91W2cYw9XHBpRGW6C331"
+postman_token = "PMAK-637f797df599196a8be5f5e0-4cc556d223abe02774730a3248dafab28d"
+dropbox_key = "57lukiw9m67st9h"
+dropbox_secret = "gm8rq2h9ck7bs72"
+dropbox_token = "sl.BTtDDRN2asc--P-Y3P_6tO9HFxe2hfz-_YjFFkdv_ckyXcbiQDXbgXsm9FsrHOnN8B5tCk1WR340BSd7zqbfNA1VupmRr4vYbQPPMIJbN0OnpC65xAhvVrS4ep9noixyseDNqqp"
+
 client = slack.WebClient(token=slack_token)
 
 class JiraSearchResults(BaseModel):
